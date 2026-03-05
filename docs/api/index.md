@@ -81,7 +81,7 @@ docker compose up
 
 ## In This Section
 
-- **[Endpoints]({% link api/endpoints.md %})** — Complete reference for every endpoint
-- **[Streaming]({% link api/streaming.md %})** — Server-Sent Events and WebSocket streaming
-- **[Batch Processing]({% link api/batch.md %})** — Submit bulk jobs and retrieve results asynchronously
-- **[Enterprise Middleware]({% link api/enterprise.md %})** — Auth, rate limiting, audit logging, and usage metering
+- **[Endpoints](endpoints)** — Complete reference for every endpoint
+- **[Streaming](streaming)** — Server-Sent Events and WebSocket streaming
+- **[Batch Processing](batch)** — Submit bulk jobs and retrieve results asynchronously
+- **[Enterprise Middleware](enterprise)** — Auth, rate limiting, audit logging, and usage metering

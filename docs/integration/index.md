@@ -73,6 +73,6 @@ curl http://localhost:3512/v1/chat/completions \
 
 ## In This Section
 
-- **[Third-Party Tools]({% link integration/third-party.md %})** — Continue.dev, Open WebUI, LangChain, LlamaIndex step-by-step setup
-- **[Code Examples]({% link integration/code-examples.md %})** — Complete Python, JavaScript/TypeScript, and curl examples with streaming and non-streaming patterns
-- **[Frontend Configuration]({% link integration/frontend-config.md %})** — Complete checklist and differences from the OpenAI API
+- **[Third-Party Tools](third-party)** — Continue.dev, Open WebUI, LangChain, LlamaIndex step-by-step setup
+- **[Code Examples](code-examples)** — Complete Python, JavaScript/TypeScript, and curl examples with streaming and non-streaming patterns
+- **[Frontend Configuration](frontend-config)** — Complete checklist and differences from the OpenAI API

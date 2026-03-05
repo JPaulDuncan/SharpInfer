@@ -10,7 +10,7 @@ nav_order: 1
 A pure C# LLM inference engine — no Python, no llama.cpp bindings, no ONNX Runtime.
 {: .fs-6 .fw-300 }
 
-[Get Started]({% link getting-started/index.md %}){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[Get Started](getting-started/index){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/jpaulduncan/SharpInfer){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
@@ -54,22 +54,22 @@ CPU inference works everywhere. Optional GPU acceleration via **CUDA** (NVIDIA),
 
 <div class="grid-of-cards">
 
-**[Getting Started]({% link getting-started/index.md %})**
+**[Getting Started](getting-started/index)**
 Install .NET, pull a model, and have your first conversation in under five minutes.
 
-**[CLI Guide]({% link cli/index.md %})**
+**[CLI Guide](cli/index)**
 All command-line flags, interactive slash commands, and configuration file reference.
 
-**[API Reference]({% link api/index.md %})**
+**[API Reference](api/index)**
 Complete REST API documentation — endpoints, request/response formats, streaming, WebSocket, and batch processing.
 
-**[Integration Guide]({% link integration/index.md %})**
+**[Integration Guide](integration/index)**
 Connect SharpInfer to Continue.dev, Open WebUI, Python, JavaScript, and custom frontends.
 
-**[VS Code Extension]({% link vscode/index.md %})**
+**[VS Code Extension](vscode/index)**
 Local AI code completion and chat inside Visual Studio Code via the JSON-RPC language server.
 
-**[Modelfile]({% link modelfile.md %})**
+**[Modelfile](modelfile)**
 Declarative model packaging — bundle a model with its system prompt, parameters, and adapters.
 
 </div>

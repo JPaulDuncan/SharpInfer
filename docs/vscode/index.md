@@ -63,7 +63,7 @@ For code completion, smaller models (1–7B) respond faster and produce focused 
 
 ## In This Section
 
-- **[Setup]({% link vscode/setup.md %})** — Build the backend and configure the extension
-- **[Code Completion]({% link vscode/completion.md %})** — How inline completions work, FIM prompting, settings
-- **[Chat]({% link vscode/chat.md %})** — Using the chat panel for coding assistance
-- **[JSON-RPC Protocol]({% link vscode/protocol.md %})** — Full protocol reference for extension developers
+- **[Setup](setup)** — Build the backend and configure the extension
+- **[Code Completion](completion)** — How inline completions work, FIM prompting, settings
+- **[Chat](chat)** — Using the chat panel for coding assistance
+- **[JSON-RPC Protocol](protocol)** — Full protocol reference for extension developers

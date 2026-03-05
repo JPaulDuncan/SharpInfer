@@ -136,6 +136,6 @@ The GPU service starts on port **8080** with CUDA acceleration enabled. Expect 3
 
 ## What's Next
 
-- [CLI Guide]({% link cli/index.md %}) — Run interactive chat directly from the terminal
-- [API Reference]({% link api/index.md %}) — Full endpoint documentation
-- [Integration Guide]({% link integration/index.md %}) — Connect to Continue.dev, Open WebUI, Python, JavaScript
+- [CLI Guide](../cli/index) — Run interactive chat directly from the terminal
+- [API Reference](../api/index) — Full endpoint documentation
+- [Integration Guide](../integration/index) — Connect to Continue.dev, Open WebUI, Python, JavaScript

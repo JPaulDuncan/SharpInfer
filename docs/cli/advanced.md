@@ -116,7 +116,7 @@ Available flow types:
 | `handoff` | Collaborative: agents decide when to pass work to another agent |
 | `review-loop` | Iterative: a writer agent produces output, a reviewer critiques it |
 
-See the [Configuration File]({% link cli/configuration.md %}) page for the full `multiAgent` config schema.
+See the [Configuration File](configuration) page for the full `multiAgent` config schema.
 
 ---
 

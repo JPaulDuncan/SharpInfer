@@ -28,7 +28,7 @@ Downloading, listing, and switching models.
 | **Safetensors** | HuggingFace's native format. Safe, fast to load, and widely available. Supports sharded multi-file models. |
 | **GPTQ** | Quantized models using group-wise INT4/INT8 compression. Auto-detected from safetensors. |
 | **AWQ** | Activation-aware weight quantization — high quality INT4 models. Auto-detected from safetensors. |
-| **Modelfile** | A declarative config file that references a base model and adds parameters, system prompts, and adapters. See [Modelfile reference]({% link modelfile.md %}). |
+| **Modelfile** | A declarative config file that references a base model and adds parameters, system prompts, and adapters. See [Modelfile reference](../modelfile). |
 | **.simodel** | A zip archive bundling a Modelfile and all its referenced assets into a single distributable file. |
 
 ---

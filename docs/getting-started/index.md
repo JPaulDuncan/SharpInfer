@@ -83,7 +83,7 @@ dotnet run --project src/SharpInfer.Cli -- --model ./models/your-model.gguf
 
 You'll see a `You >` prompt. Type and press Enter. The response streams back token by token.
 
-→ See the full [CLI Guide]({% link cli/index.md %}) for all options and commands.
+→ See the full [CLI Guide](../cli/index) for all options and commands.
 
 ### API Server
 
@@ -93,7 +93,7 @@ dotnet run --project src/SharpInfer.Api -- --port 3512 --models-dir ./models
 
 The server starts with no model loaded. Use `/api/pull` to download a model, then `/api/load` to activate it. Once a model is loaded, send chat requests to `/v1/chat/completions`.
 
-→ See the [API Reference]({% link api/index.md %}) for full endpoint documentation.
+→ See the [API Reference](../api/index) for full endpoint documentation.
 
 ### Docker
 

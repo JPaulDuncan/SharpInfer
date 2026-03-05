@@ -135,7 +135,7 @@ curl -X POST http://localhost:3512/v1/chat/completions \
 
 ### Streaming Response
 
-See the [Streaming]({% link api/streaming.md %}) page for full SSE format documentation.
+See the [Streaming](streaming) page for full SSE format documentation.
 
 ---
 
