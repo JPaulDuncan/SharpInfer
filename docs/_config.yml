@@ -6,7 +6,7 @@ url: "https://jpaulduncan.github.io"
 theme: just-the-docs
 
 # Just the Docs configuration
-color_scheme: dark
+color_scheme: light
 search_enabled: true
 search:
   heading_level: 2
@@ -16,6 +16,10 @@ search:
   tokenizer_separator: /[\s/]+/
   rel_url: true
   button: false
+
+enable_copy_code_button: true
+
+nav_sort: case_insensitive
 
 # Aux links in the top-right
 aux_links:
@@ -56,7 +60,10 @@ plugins:
   - jekyll-seo-tag
 
 # Exclude from build
+
 exclude:
+  - Gemfile
+  - Gemfile.lock
   - "*.gemspec"
   - "node_modules/"
   - "vendor/"
