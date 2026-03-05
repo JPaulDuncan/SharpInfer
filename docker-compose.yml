@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────
+# SharpInfer API — Docker Compose
+# ─────────────────────────────────────────────────────────────
+# Quick start:
+#   1. Run: docker compose up
+#   2. Use the model management API to pull and load a model:
+#      curl -X POST http://localhost:3512/api/pull -d '{"name":"hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:latest"}'
+#      curl -X POST http://localhost:3512/api/load -d '{"name":"Meta-Llama-3.1-8B-Instruct"}'
+#
+# Or place a .gguf file in ./models/ and pre-load on startup:
+#   docker compose run sharpinfer --model /models/your-model.gguf --port 3512
+#
+# Pre-load a model on startup:
+#   docker compose run sharpinfer --model /models/your-model.gguf --port 3512
+#
+# With GPU (requires NVIDIA Container Toolkit):
+#   docker compose --profile gpu up
+# ─────────────────────────────────────────────────────────────
+
+services:
+  # ── CPU-only (default) ──────────────────────────────────────
+  sharpinfer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sharpinfer-api
+    ports:
+      - "${API_PORT:-3512}:3512"
+    volumes:
+      - ./models:/models
+    command: ["--port", "3512", "--models-dir", "/models"]
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - ASPNETCORE_URLS=http://+:3512
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3512/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ── GPU-enabled (opt-in via --profile gpu) ──────────────────
+  sharpinfer-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sharpinfer-api-gpu
+    profiles:
+      - gpu
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - ./models:/models
+    command: ["--port", "8080", "--models-dir", "/models", "--gpu"]
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      - ASPNETCORE_URLS=http://+:8080
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3512/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

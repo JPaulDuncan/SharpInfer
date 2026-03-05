@@ -1,0 +1,34 @@
+# Build artifacts
+**/bin/
+**/obj/
+**/out/
+
+# IDE and tools
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Documentation
+Documents/
+*.docx
+*.pdf
+
+# Git
+.git/
+.gitignore
+
+# Docker (prevent recursive context)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Models (large files — mount as volumes instead)
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# Misc
+*.md
+*.log
