@@ -18,6 +18,7 @@ public enum QuantType
     Q4_K = 12,
     Q5_K = 13,
     Q6_K = 14,
+    BF16 = 30,
 }
 
 /// <summary>
@@ -48,13 +49,17 @@ public static class Dequantize
     {
         QuantType.Q4_0 => 2 + 16,       // f16 scale + 16 bytes (32 x 4-bit)
         QuantType.Q4_1 => 2 + 2 + 16,   // f16 scale + f16 min + 16 bytes
+        QuantType.Q5_0 => 2 + 4 + 16,   // f16 scale + 4 high-bit bytes + 16 packed bytes
+        QuantType.Q5_1 => 2 + 2 + 4 + 16, // f16 scale + f16 min + 4 high-bit bytes + 16 packed bytes
         QuantType.Q8_0 => 2 + 32,       // f16 scale + 32 bytes (32 x 8-bit)
+        QuantType.Q8_1 => 2 + 2 + 32,   // f16 scale + f16 sum + 32 bytes (32 x 8-bit)
         QuantType.Q2_K => 84,           // f16 d + f16 dmin + 16 scales + 64 qs
         QuantType.Q3_K => 110,          // f16 d + 32 hmask + 64 qs + 12 scales
         QuantType.Q4_K => 144,          // f16 d + f16 dmin + 12 scales + 128 qs
         QuantType.Q5_K => 176,          // f16 d + f16 dmin + 12 scales + 128 qs + 32 qh
         QuantType.Q6_K => 210,          // f16 d + 128 ql + 64 qh + 16 scales
         QuantType.F16 => 2,
+        QuantType.BF16 => 2,
         QuantType.F32 => 4,
         _ => throw new NotSupportedException($"Quantization type {type} not yet implemented.")
     };
@@ -105,6 +110,60 @@ public static class Dequantize
         for (int j = 0; j < 32; j++)
         {
             output[j] = (sbyte)block[2 + j] * scale;
+        }
+    }
+
+    /// <summary>
+    /// Dequantize Q5_0 block: 32 weights with 5-bit quants (4 low + 1 high).
+    /// Layout: [f16 scale][4 high-bit bytes][16 packed bytes (low 4-bit pairs)]
+    /// </summary>
+    public static void DequantQ5_0(ReadOnlySpan<byte> block, Span<float> output)
+    {
+        float scale = HalfToFloat(block[..2]);
+        uint qh = BitConverter.ToUInt32(block.Slice(2, 4));
+
+        for (int j = 0; j < 16; j++)
+        {
+            byte packed = block[6 + j];
+            int x0 = (packed & 0x0F) | (((int)(qh >> j) & 1) << 4);
+            int x1 = (packed >> 4) | (((int)(qh >> (j + 16)) & 1) << 4);
+            output[j] = (x0 - 16) * scale;
+            output[j + 16] = (x1 - 16) * scale;
+        }
+    }
+
+    /// <summary>
+    /// Dequantize Q5_1 block: like Q5_0 but with asymmetric min value.
+    /// Layout: [f16 scale][f16 min][4 high-bit bytes][16 packed bytes]
+    /// </summary>
+    public static void DequantQ5_1(ReadOnlySpan<byte> block, Span<float> output)
+    {
+        float scale = HalfToFloat(block[..2]);
+        float min = HalfToFloat(block.Slice(2, 2));
+        uint qh = BitConverter.ToUInt32(block.Slice(4, 4));
+
+        for (int j = 0; j < 16; j++)
+        {
+            byte packed = block[8 + j];
+            int x0 = (packed & 0x0F) | (((int)(qh >> j) & 1) << 4);
+            int x1 = (packed >> 4) | (((int)(qh >> (j + 16)) & 1) << 4);
+            output[j] = x0 * scale + min;
+            output[j + 16] = x1 * scale + min;
+        }
+    }
+
+    /// <summary>
+    /// Dequantize Q8_1 block: 32 weights as signed 8-bit with scale and sum (asymmetric).
+    /// Layout: [f16 scale][f16 sum][32 signed bytes]
+    /// The sum is used for dot product optimization but not needed for simple dequantization.
+    /// </summary>
+    public static void DequantQ8_1(ReadOnlySpan<byte> block, Span<float> output)
+    {
+        float scale = HalfToFloat(block[..2]);
+        // block[2..4] is the sum, not needed for dequant
+        for (int j = 0; j < 32; j++)
+        {
+            output[j] = (sbyte)block[4 + j] * scale;
         }
     }
 
@@ -339,6 +398,17 @@ public static class Dequantize
     }
 
     /// <summary>
+    /// Convert a 2-byte bfloat16 to a C# float.
+    /// BF16 is the upper 16 bits of a 32-bit float, so we just shift left by 16.
+    /// </summary>
+    public static float BFloat16ToFloat(ReadOnlySpan<byte> bytes)
+    {
+        ushort bf = BitConverter.ToUInt16(bytes);
+        uint f32bits = (uint)bf << 16;
+        return BitConverter.UInt32BitsToSingle(f32bits);
+    }
+
+    /// <summary>
     /// Dequantize an entire weight tensor from raw bytes.
     /// Returns a float array suitable for use in tensor operations.
     /// </summary>
@@ -360,6 +430,14 @@ public static class Dequantize
             return result;
         }
 
+        if (type == QuantType.BF16)
+        {
+            var result = new float[numElements];
+            for (int i = 0; i < numElements; i++)
+                result[i] = BFloat16ToFloat(data.Slice(i * 2, 2));
+            return result;
+        }
+
         int blockSize = BlockSize(type);
         int blockBytes = BlockBytes(type);
         int numBlocks = numElements / blockSize;
@@ -374,7 +452,10 @@ public static class Dequantize
             {
                 case QuantType.Q4_0: DequantQ4_0(block, dest); break;
                 case QuantType.Q4_1: DequantQ4_1(block, dest); break;
+                case QuantType.Q5_0: DequantQ5_0(block, dest); break;
+                case QuantType.Q5_1: DequantQ5_1(block, dest); break;
                 case QuantType.Q8_0: DequantQ8_0(block, dest); break;
+                case QuantType.Q8_1: DequantQ8_1(block, dest); break;
                 case QuantType.Q2_K: DequantQ2_K(block, dest); break;
                 case QuantType.Q3_K: DequantQ3_K(block, dest); break;
                 case QuantType.Q4_K: DequantQ4_K(block, dest); break;
