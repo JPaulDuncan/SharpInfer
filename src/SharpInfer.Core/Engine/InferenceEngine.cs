@@ -55,7 +55,7 @@ public class InferenceEngine : IDisposable
 
         var transformer = new Transformer(config, weights, backend);
         var tokenizer = new BpeTokenizer(tokenizerData, config.BosTokenId, config.EosTokenId);
-        var sampler = new SamplingPipeline(options.GenerationConfig.Seed);
+        var sampler = new SamplingPipeline(options.GenerationConfig.Seed, config.VocabSize);
         var tools = new ToolRegistry();
         var kvCache = new KVCache(config);
 
@@ -91,7 +91,10 @@ public class InferenceEngine : IDisposable
 
         for (int step = 0; step < config.MaxTokens; step++)
         {
-            float[] logits = _transformer.Forward(lastTokenId, position, _kvCache).ToArray();
+            // Forward() returns a ReadOnlySpan into a pre-allocated buffer — pass it directly
+            // to the sampler (which also has its own pre-allocated copy buffer) to avoid a
+            // per-token float[vocabSize] heap allocation.
+            var logits = _transformer.Forward(lastTokenId, position, _kvCache);
             int nextTokenId = _sampler.Sample(logits, config, generatedIds);
 
             if (stopTokens.Contains(nextTokenId))

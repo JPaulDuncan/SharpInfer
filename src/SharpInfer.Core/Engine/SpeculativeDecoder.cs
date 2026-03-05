@@ -31,20 +31,47 @@ public class SpeculativeDecoder
     private readonly SamplingPipeline _sampler;
     private readonly Random _rng;
 
-    /// <summary>Number of tokens the draft model generates per speculation round.</summary>
-    public int LookaheadTokens { get; set; } = 5;
+    /// <summary>
+    /// Number of tokens the draft model generates per speculation round.
+    /// Fixed at construction time — changing it post-construction would exceed the
+    /// pre-allocated logit buffers (_draftLogitBuf / _targetLogitBuf).
+    /// </summary>
+    public int LookaheadTokens { get; }
 
     /// <summary>Running statistics for acceptance rate monitoring.</summary>
     public int TotalDrafted { get; private set; }
     public int TotalAccepted { get; private set; }
     public float AcceptanceRate => TotalDrafted > 0 ? (float)TotalAccepted / TotalDrafted : 0f;
 
-    public SpeculativeDecoder(Transformer target, Transformer draft, int seed = -1)
+    // Pre-allocated logit storage: [LookaheadTokens + 1][vocabSize]
+    // Avoids ToArray() + new float[] on every draft/verify token.
+    private readonly float[][] _draftLogitBuf;
+    private readonly float[][] _targetLogitBuf;
+    // Pre-allocated scratch for ComputeAdjustedDistribution
+    private readonly float[] _pTarget;
+    private readonly float[] _pDraft;
+    private readonly float[] _adjusted;
+
+    public SpeculativeDecoder(Transformer target, Transformer draft, int lookaheadTokens = 5, int seed = -1)
     {
+        LookaheadTokens = lookaheadTokens;
         _target = target;
         _draft = draft;
-        _sampler = new SamplingPipeline(seed);
+        _sampler = new SamplingPipeline(seed, target.Config.VocabSize);
         _rng = seed >= 0 ? new Random(seed) : new Random();
+
+        int vocab = target.Config.VocabSize;
+        int maxLookahead = LookaheadTokens + 1; // +1 for bonus token
+        _draftLogitBuf  = new float[maxLookahead][];
+        _targetLogitBuf = new float[maxLookahead][];
+        for (int i = 0; i < maxLookahead; i++)
+        {
+            _draftLogitBuf[i]  = new float[vocab];
+            _targetLogitBuf[i] = new float[vocab];
+        }
+        _pTarget  = new float[vocab];
+        _pDraft   = new float[vocab];
+        _adjusted = new float[vocab];
 
         if (draft.Config.VocabSize != target.Config.VocabSize)
             throw new ArgumentException("Draft and target models must have the same vocabulary size.");
@@ -71,19 +98,26 @@ public class SpeculativeDecoder
         int lastToken = promptTokens[^1];
         var stopTokens = new HashSet<int>(config.StopTokenIds) { _target.Config.EosTokenId };
 
+        // Hoist these outside the loop — reuse across speculation rounds via Clear()
+        var draftTokens = new List<int>(LookaheadTokens);
+        int numDraft = 0;   // how many entries in _draftLogitBuf are valid this round
+        int numTarget = 0;  // how many entries in _targetLogitBuf are valid this round
+
         for (int step = 0; step < config.MaxTokens;)
         {
             // --- Phase 1: Draft K tokens ---
-            var draftTokens = new List<int>();
-            var draftLogits = new List<float[]>();
+            draftTokens.Clear();
+            numDraft = 0;
             int draftToken = lastToken;
 
             for (int k = 0; k < LookaheadTokens && step + k < config.MaxTokens; k++)
             {
-                float[] logits = _draft.Forward(draftToken, position + k, draftCache).ToArray();
-                draftLogits.Add(logits);
+                // Copy logits directly into the pre-allocated slot (no ToArray())
+                _draft.Forward(draftToken, position + k, draftCache)
+                      .CopyTo(_draftLogitBuf[k]);
+                numDraft = k + 1;
 
-                draftToken = _sampler.Sample(logits, config, generated);
+                draftToken = _sampler.Sample(_draftLogitBuf[k], config, generated);
                 draftTokens.Add(draftToken);
 
                 if (stopTokens.Contains(draftToken)) break;
@@ -92,18 +126,19 @@ public class SpeculativeDecoder
             TotalDrafted += draftTokens.Count;
 
             // --- Phase 2: Verify with target model ---
-            // Run target model on each draft token position
-            var targetLogits = new List<float[]>();
+            numTarget = 0;
             for (int k = 0; k < draftTokens.Count; k++)
             {
                 int tokenToVerify = k == 0 ? lastToken : draftTokens[k - 1];
-                float[] logits = _target.Forward(tokenToVerify, position + k, targetCache).ToArray();
-                targetLogits.Add(logits);
+                _target.Forward(tokenToVerify, position + k, targetCache)
+                       .CopyTo(_targetLogitBuf[k]);
+                numTarget = k + 1;
             }
 
             // Also run target on the position after the last draft token
             // (to get the next token if all drafts are accepted)
-            float[] bonusLogits = _target.Forward(draftTokens[^1], position + draftTokens.Count, targetCache).ToArray();
+            _target.Forward(draftTokens[^1], position + draftTokens.Count, targetCache)
+                   .CopyTo(_targetLogitBuf[numTarget]); // slot numTarget = bonusLogits
 
             // --- Phase 3: Accept/reject via rejection sampling ---
             int accepted = 0;
@@ -112,8 +147,8 @@ public class SpeculativeDecoder
                 int candidateToken = draftTokens[k];
 
                 // Compute acceptance probability
-                float pTarget = GetTokenProbability(targetLogits[k], candidateToken, config);
-                float pDraft = GetTokenProbability(draftLogits[k], candidateToken, config);
+                float pTarget = GetTokenProbability(_targetLogitBuf[k], candidateToken, config);
+                float pDraft  = GetTokenProbability(_draftLogitBuf[k],  candidateToken, config);
 
                 float acceptProb = Math.Min(1f, pTarget / Math.Max(pDraft, 1e-10f));
 
@@ -131,7 +166,7 @@ public class SpeculativeDecoder
                 else
                 {
                     // Reject: sample from adjusted distribution (target - draft)
-                    var adjusted = ComputeAdjustedDistribution(targetLogits[k], draftLogits[k], config);
+                    var adjusted = ComputeAdjustedDistribution(_targetLogitBuf[k], _draftLogitBuf[k], config);
                     int correctedToken = SampleFromDistribution(adjusted);
 
                     generated.Add(correctedToken);
@@ -152,7 +187,7 @@ public class SpeculativeDecoder
             if (accepted == draftTokens.Count)
             {
                 // All drafts accepted — bonus: sample one more from target
-                int bonusToken = _sampler.Sample(bonusLogits, config, generated);
+                int bonusToken = _sampler.Sample(_targetLogitBuf[numTarget], config, generated);
                 generated.Add(bonusToken);
                 yield return bonusToken;
                 step++;
@@ -201,55 +236,56 @@ public class SpeculativeDecoder
     /// <summary>
     /// Compute max(0, p_target - p_draft) normalized to a valid distribution.
     /// This is the "residual" distribution used when a draft token is rejected.
+    /// Writes into the pre-allocated _adjusted buffer; returns it (no allocation).
     /// </summary>
     private float[] ComputeAdjustedDistribution(float[] targetLogits, float[] draftLogits, GenerationConfig config)
     {
         int vocabSize = targetLogits.Length;
-        var pTarget = SoftmaxWithTemp(targetLogits, config.Temperature);
-        var pDraft = SoftmaxWithTemp(draftLogits, config.Temperature);
+        SoftmaxWithTemp(targetLogits, config.Temperature, _pTarget);
+        SoftmaxWithTemp(draftLogits,  config.Temperature, _pDraft);
 
-        var adjusted = new float[vocabSize];
         float sum = 0f;
-
         for (int i = 0; i < vocabSize; i++)
         {
-            adjusted[i] = MathF.Max(0f, pTarget[i] - pDraft[i]);
-            sum += adjusted[i];
+            _adjusted[i] = MathF.Max(0f, _pTarget[i] - _pDraft[i]);
+            sum += _adjusted[i];
         }
 
         if (sum > 0f)
         {
             float invSum = 1f / sum;
             for (int i = 0; i < vocabSize; i++)
-                adjusted[i] *= invSum;
+                _adjusted[i] *= invSum;
         }
         else
         {
             // Fallback to target distribution
-            pTarget.CopyTo(adjusted, 0);
+            _pTarget.CopyTo(_adjusted, 0);
         }
 
-        return adjusted;
+        return _adjusted;
     }
 
-    private float[] SoftmaxWithTemp(float[] logits, float temperature)
+    /// <summary>
+    /// Softmax with temperature, writing into a pre-allocated output buffer.
+    /// No heap allocation.
+    /// </summary>
+    private static void SoftmaxWithTemp(float[] logits, float temperature, float[] output)
     {
-        var result = new float[logits.Length];
-        float maxVal = logits.Max();
+        float maxVal = logits[0];
+        for (int i = 1; i < logits.Length; i++) if (logits[i] > maxVal) maxVal = logits[i];
+
         float sum = 0f;
         float invT = temperature > 0 ? 1f / temperature : 1f;
-
         for (int i = 0; i < logits.Length; i++)
         {
-            result[i] = MathF.Exp((logits[i] - maxVal) * invT);
-            sum += result[i];
+            output[i] = MathF.Exp((logits[i] - maxVal) * invT);
+            sum += output[i];
         }
 
         float inv = 1f / sum;
         for (int i = 0; i < logits.Length; i++)
-            result[i] *= inv;
-
-        return result;
+            output[i] *= inv;
     }
 
     private int SampleFromDistribution(float[] probs)

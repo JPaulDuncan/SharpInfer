@@ -252,6 +252,10 @@ internal class JsonSchemaValidator
 
     private void AdvanceChar(char c)
     {
+        // Iterative loop replaces the original tail-recursive call in the InNumber case.
+        // When a number ends mid-stream, we pop InNumber and re-dispatch the same char
+        // against the parent state without growing the call stack.
+        retry:
         if (_stateStack.Count == 0) return;
         var state = _stateStack.Peek();
 
@@ -323,8 +327,8 @@ internal class JsonSchemaValidator
                 if (c is not ('-' or '.' or 'e' or 'E' or '+' or (>= '0' and <= '9')))
                 {
                     _stateStack.Pop();
-                    // Re-process this char in parent state
-                    AdvanceChar(c);
+                    // Re-process this char in the parent state without recursing.
+                    goto retry;
                 }
                 break;
         }

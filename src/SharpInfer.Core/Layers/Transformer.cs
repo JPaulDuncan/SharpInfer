@@ -28,6 +28,8 @@ public class Transformer
     private readonly float[] _ffnUp;    // FFN up projection
     private readonly float[] _ffnDown;  // FFN down projection
     private readonly float[] _logits;   // Output logits [vocabSize]
+    private readonly float[] _scores;   // Attention scores scratch [maxSeqLen] — avoids stackalloc in hot loop
+    private readonly float[] _attnProj; // Attention output projection scratch [hiddenSize]
 
     public ModelConfig Config => _config;
 
@@ -50,6 +52,8 @@ public class Transformer
         _ffnUp = new float[inter];
         _ffnDown = new float[h];
         _logits = new float[config.VocabSize];
+        _scores = new float[config.MaxSequenceLength];
+        _attnProj = new float[h];
     }
 
     /// <summary>
@@ -101,8 +105,11 @@ public class Transformer
                 int kvHead = head / kvGroups; // GQA: multiple query heads share one KV head
                 var qHead = _q.AsSpan(head * headDim, headDim);
 
-                // Compute attention scores for all cached positions
-                Span<float> scores = stackalloc float[position + 1];
+                // Compute attention scores for all cached positions.
+                // Use a pre-allocated heap buffer (slice to actual length) to avoid
+                // stackalloc inside a nested loop — which exhausts the 1 MB thread-pool
+                // stack when context length × num_heads × num_layers is large.
+                Span<float> scores = _scores.AsSpan(0, position + 1);
                 for (int t = 0; t <= position; t++)
                 {
                     var cachedK = kvCache.GetKey(layer, t, kvHead, headDim);
@@ -122,11 +129,10 @@ public class Transformer
             }
 
             // Output projection
-            float[] attnProjected = new float[h];
-            _compute.MatVecMul(lw.Wo, _attnOut, attnProjected, h, h);
+            _compute.MatVecMul(lw.Wo, _attnOut, _attnProj, h, h);
 
             // Residual connection
-            _compute.AddInPlace(_x, attnProjected);
+            _compute.AddInPlace(_x, _attnProj);
 
             // === Feed-Forward Network (SwiGLU) ===
 

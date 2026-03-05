@@ -31,6 +31,11 @@ public class ClassifierFreeGuidance
     private readonly Transformer _model;
     private readonly SamplingPipeline _sampler;
 
+    // Pre-allocated per-token scratch buffers (avoids 3 × float[vocabSize] per token)
+    private readonly float[] _condLogits;
+    private readonly float[] _uncondLogits;
+    private readonly float[] _guidedLogits;
+
     /// <summary>Guidance scale. 1.0 = disabled, >1.0 = stronger instruction following.</summary>
     public float GuidanceScale { get; set; } = 1.5f;
 
@@ -41,7 +46,12 @@ public class ClassifierFreeGuidance
     {
         _model = model;
         GuidanceScale = guidanceScale;
-        _sampler = new SamplingPipeline(seed);
+        _sampler = new SamplingPipeline(seed, model.Config.VocabSize);
+
+        int vocab = model.Config.VocabSize;
+        _condLogits   = new float[vocab];
+        _uncondLogits = new float[vocab];
+        _guidedLogits = new float[vocab];
     }
 
     /// <summary>
@@ -71,21 +81,18 @@ public class ClassifierFreeGuidance
 
         for (int step = 0; step < config.MaxTokens; step++)
         {
-            // Conditional forward pass (full prompt)
-            var condLogits = _model.Forward(lastCondToken, condPos, condCache).ToArray();
+            // Conditional forward pass (full prompt) — copy into pre-allocated buffer
+            _model.Forward(lastCondToken, condPos, condCache).CopyTo(_condLogits);
 
             // Unconditional forward pass (empty/negative prompt)
-            var uncondLogits = _model.Forward(lastUncondToken, uncondPos, uncondCache).ToArray();
+            _model.Forward(lastUncondToken, uncondPos, uncondCache).CopyTo(_uncondLogits);
 
             // Apply guidance: guided = uncond + scale * (cond - uncond)
-            var guidedLogits = new float[condLogits.Length];
-            for (int i = 0; i < guidedLogits.Length; i++)
-            {
-                guidedLogits[i] = uncondLogits[i] + GuidanceScale * (condLogits[i] - uncondLogits[i]);
-            }
+            for (int i = 0; i < _guidedLogits.Length; i++)
+                _guidedLogits[i] = _uncondLogits[i] + GuidanceScale * (_condLogits[i] - _uncondLogits[i]);
 
             // Sample from guided logits
-            int nextToken = _sampler.Sample(guidedLogits, config, generated);
+            int nextToken = _sampler.Sample(_guidedLogits, config, generated);
 
             if (stopTokens.Contains(nextToken))
                 yield break;

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using SharpInfer.Core.Tensors;
@@ -71,13 +72,15 @@ public static class FlashAttention
         int blockQ = Math.Min(BLOCK_SIZE_Q, seqLen);
         int blockKV = Math.Min(BLOCK_SIZE_KV, kvLen);
 
-        // Per-row accumulators (reused across KV blocks)
-        var rowMax = new float[blockQ];     // Running max for online softmax
-        var rowSum = new float[blockQ];     // Running sum of exp(s - max)
-        var rowOut = new float[blockQ * headDim]; // Accumulated output
+        // Rent per-call scratch buffers from the shared pool instead of allocating.
+        // ArrayPool.Rent may return a larger array; we only use [0..size).
+        float[] rowMax = ArrayPool<float>.Shared.Rent(blockQ);
+        float[] rowSum = ArrayPool<float>.Shared.Rent(blockQ);
+        float[] rowOut = ArrayPool<float>.Shared.Rent(blockQ * headDim);
+        float[] sBlock = ArrayPool<float>.Shared.Rent(blockQ * blockKV);
 
-        // Temporary block for S_ij = Q_i @ K_j^T
-        var sBlock = new float[blockQ * blockKV];
+        try
+        {
 
         // Process Q in blocks
         for (int qi = 0; qi < seqLen; qi += blockQ)
@@ -151,6 +154,15 @@ public static class FlashAttention
                         output[outRowOffset + d] = rowOut[accRowOffset + d] * invSum;
                 }
             }
+        }
+
+        } // end try
+        finally
+        {
+            ArrayPool<float>.Shared.Return(rowMax);
+            ArrayPool<float>.Shared.Return(rowSum);
+            ArrayPool<float>.Shared.Return(rowOut);
+            ArrayPool<float>.Shared.Return(sBlock);
         }
     }
 

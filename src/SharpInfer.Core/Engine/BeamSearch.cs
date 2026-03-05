@@ -50,9 +50,13 @@ public class BeamSearch
     /// <summary>Number of final results to return (must be &lt;= NumBeams).</summary>
     public int NumReturn { get; set; } = 1;
 
+    // Single pre-allocated logit buffer — beams are processed sequentially so one buffer suffices.
+    private readonly float[] _logitBuf;
+
     public BeamSearch(Transformer model)
     {
         _model = model;
+        _logitBuf = new float[model.Config.VocabSize];
     }
 
     /// <summary>
@@ -104,18 +108,20 @@ public class BeamSearch
                 }
 
                 int lastToken = beam.Tokens[^1];
-                var logits = _model.Forward(lastToken, position + step, beam.Cache).ToArray();
+                // Copy into pre-allocated buffer — no ToArray() allocation
+                _model.Forward(lastToken, position + step, beam.Cache).CopyTo(_logitBuf);
 
                 // Convert to log probabilities
-                float maxLogit = logits.Max();
+                float maxLogit = _logitBuf[0];
+                for (int i = 1; i < vocabSize; i++) if (_logitBuf[i] > maxLogit) maxLogit = _logitBuf[i];
                 float logSumExp = 0f;
                 for (int i = 0; i < vocabSize; i++)
-                    logSumExp += MathF.Exp(logits[i] - maxLogit);
+                    logSumExp += MathF.Exp(_logitBuf[i] - maxLogit);
                 logSumExp = maxLogit + MathF.Log(logSumExp);
 
                 // Take top-K tokens per beam (K = 2 * NumBeams for diversity)
                 int topK = NumBeams * 2;
-                var topIndices = logits
+                var topIndices = _logitBuf
                     .Select((val, idx) => (val, idx))
                     .OrderByDescending(x => x.val)
                     .Take(topK)
