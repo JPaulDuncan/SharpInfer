@@ -19,6 +19,9 @@ public class InferenceEngine : IDisposable
     private readonly SamplingPipeline _sampler;
     private readonly ToolRegistry _tools;
     private KVCache _kvCache;
+    // Pre-allocated logit buffer: ReadOnlySpan<float> (ref struct) cannot be stored
+    // in an async state machine, so we copy Forward() output here before sampling.
+    private readonly float[] _logitBuf;
 
     public ModelConfig Config => _transformer.Config;
     public ToolRegistry Tools => _tools;
@@ -31,6 +34,7 @@ public class InferenceEngine : IDisposable
         _sampler = sampler;
         _tools = tools;
         _kvCache = kvCache;
+        _logitBuf = new float[transformer.Config.VocabSize];
     }
 
     /// <summary>
@@ -91,11 +95,11 @@ public class InferenceEngine : IDisposable
 
         for (int step = 0; step < config.MaxTokens; step++)
         {
-            // Forward() returns a ReadOnlySpan into a pre-allocated buffer — pass it directly
-            // to the sampler (which also has its own pre-allocated copy buffer) to avoid a
-            // per-token float[vocabSize] heap allocation.
-            var logits = _transformer.Forward(lastTokenId, position, _kvCache);
-            int nextTokenId = _sampler.Sample(logits, config, generatedIds);
+            // Forward() returns a ReadOnlySpan<float> (ref struct). Ref structs cannot be
+            // captured by async state machines, so we copy into a pre-allocated heap buffer
+            // before crossing any await point. Still zero per-token allocation.
+            _transformer.Forward(lastTokenId, position, _kvCache).CopyTo(_logitBuf);
+            int nextTokenId = _sampler.Sample(_logitBuf, config, generatedIds);
 
             if (stopTokens.Contains(nextTokenId))
                 break;
